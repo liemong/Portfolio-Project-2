@@ -1,0 +1,248 @@
+---
+title: "What affects the gross revenue of a movie?"
+author: "Liem Ong"
+output:
+  html_document: default
+---
+
+# Synopsis
+
+This project explores the [movies data set](https://www.kaggle.com/datasets/danielgrijalvas/movies) from Kaggle and looks to find what factors affect gross revenue the most. The data is first cleaned by removing missing values/duplicates and reformatting some columns for consistency and readability. The analysis of the data looks at correlation coefficients to find out which factors have a positive correlation with gross revenue and the p-value of each correlation coefficient is used to check if the results are statistically significant. The two factors having the highest correlation with gross revenue are then visualized.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(lubridate)
+library(sjPlot)
+library(corrplot)
+# '<p>&nbsp;</p>' is just for formatting the HTML document and represents a blank line for spacing purposes 
+```
+
+
+
+```{r, include=FALSE}
+# Reading the csv data from directory into R
+movies <- read.csv("./movies.csv")
+```
+
+
+## Data Overview
+```{r, echo=FALSE}
+# Looking at overview of the data
+rmarkdown::paged_table(movies)
+```
+
+##### Columns
+
+* budget: the budget of a movie. Some movies don't have this, so it appears as 0
+
+* company: the production company
+
+* country: country of origin
+
+* director: the director
+
+* genre: main genre of the movie.
+
+* gross: revenue of the movie (in USA only)
+
+* name: name of the movie
+
+* rating: rating of the movie (R, PG, etc.)
+
+* released: release date (YYYY-MM-DD)
+
+* runtime: duration of the movie (minutes)
+
+* score: IMDb user rating
+
+* votes: number of user votes
+
+* star: main actor/actress
+
+* writer: writer of the movie
+
+* year: year of release
+
+<p>&nbsp;</p>
+
+# Data Cleaning
+
+### Checking for missing values
+
+```{r}
+missing_values <- sapply(movies, function(x) sum(is.na(x)))
+```
+
+
+```{r, echo=FALSE}
+knitr::kable(missing_values, 
+             col.names = "Missing Values")
+```
+A majority of the missing values occur in the 'budget' column of the data and the rest is spread across multiple columns. I think that it would be unreasonable and very time consuming to fill all the missing values with information found on the internet. So instead, for this project we will remove rows with missing values from the data. But before we do this, we should check how much of the data will be lost after removing the rows with missing values.
+
+<p>&nbsp;</p>
+
+```{r}
+percent_missing_values <- colMeans(is.na(movies))*100
+```
+
+```{r, echo=FALSE}
+knitr::kable(percent_missing_values, 
+             col.names = "% Missing Values")
+```
+
+After the removal of the rows containing missing values, we will be left with around 70% of the original data. I think this leaves us with an adequate amount of data to analyse and draw some general conclusions from. So we will move along with removing the rows with missing values from the data.
+
+<p>&nbsp;</p>
+
+```{r, echo=FALSE}
+# Removing rows with the missing values
+movies <- movies[complete.cases(movies),]
+missing_values <- sapply(movies, function(x) sum(is.na(x)))
+```
+
+
+
+### Checking for duplicate data
+```{r}
+unique_movies <- distinct(movies)
+
+nrow(unique_movies) == nrow(movies)
+```
+Next we will check for duplicate data by checking if all the rows of the data are unique by comparing the number of rows that are unique with the number of rows of the original data set. The TRUE output indicates that the number of unique rows is the same as the number of rows in the movies data set, so there are no duplicate values.
+
+<p>&nbsp;</p>
+
+### Reformatting columns
+
+##### Structure of the data
+```{r, echo=FALSE}
+# Looking at data types of columns
+str(movies)
+```
+
+Here is an overview of the data types of each column currently. We first notice that the release date of the movie is a character type in the 'released' column, which does not seem correct because we would expect a date data type. This could be due to the column having both date and country of origin in one line. In order to reformat the 'released' column to a date data type, we must first isolate the date. 
+
+<p>&nbsp;</p>
+
+```{r}
+movies$released <- gsub("\\s*\\([^\\)]+\\)","",movies$released) 
+```
+
+```{r, echo=FALSE}
+rmarkdown::paged_table(movies)
+```
+
+
+We will be doing this with the gsub function and using a regular expression to help remove all elements that are contained within brackets. 
+
+<p>&nbsp;</p>
+
+```{r, echo=FALSE}
+rmarkdown::paged_table(movies[str_length(movies$released)==4,])
+```
+Next we notice that some dates in the 'released' column only show year.
+
+<p>&nbsp;</p>
+
+```{r}
+movies[str_length(movies$released)==4,]$released <- paste0("January 1, ", movies[str_length(movies$released)==4,]$released) 
+```
+
+So we will add a default month and day to the date as we are mainly concerned about the year and want to avoid the mdy() function from converting these values into NULL values instead of a date.
+
+<p>&nbsp;</p>
+
+```{r}
+movies$released <- mdy(movies$released)
+```
+
+```{r, echo=FALSE}
+rmarkdown::paged_table(movies)
+```
+
+We can now convert the 'released' column to the date data type.
+
+<p>&nbsp;</p>
+
+```{r, echo=FALSE}
+rmarkdown::paged_table(movies[year(movies$released)!=movies$year,])
+```
+
+The next issue we notice is that some years in the 'released' column are inconsistent with the 'year' column. 
+
+<p>&nbsp;</p>
+
+```{r}
+movies <- mutate(movies, year = year(movies$released))
+```
+
+```{r, echo=FALSE}
+rmarkdown::paged_table(movies)
+```
+To fix this, we will use the year from the 'released' column to change the 'year' column of each movie accordingly for consistency.
+
+<p>&nbsp;</p>
+
+# Preliminary Data Exploration
+```{r, echo=FALSE}
+# Sorting the dataframe by 'gross'
+rmarkdown::paged_table(arrange(movies, desc(movies$gross)))
+```
+
+Before we conduct the data analysis, we can look at the data to generate an initial hypothesis. Ordering the data by gross revenue descending allows us to see that movies that have high gross revenue tend to also have higher budgets. This would make sense because it would be expected for high budget movies to also generate more gross revenue. The other variables appear to have no noticeable relationship with gross revenue upon early inspection of the data. But we will look at the correlation coefficients to check our early hypothesis and find other potential factors that may influence gross revenue.
+
+<p>&nbsp;</p>
+
+# Data Analysis
+
+```{r, echo=FALSE}
+# Looking at correlation
+# look at pvalue too
+movies_cor <- cor(movies[,sapply(movies,is.numeric)])
+```
+
+### Looking at correlation coefficients
+```{r, echo=FALSE}
+# visualise correlation matrix
+corrplot(movies_cor, method = "color", type = "lower", title = "Movies Correlation Matrix", mar = c(0,0,1,0))
+```
+
+```{r, echo=FALSE, fig.align = 'right'}
+# check p-values of correlation coefficients to see if they are statistically significant.
+tab_corr(movies[,sapply(movies,is.numeric)], p.numeric = TRUE, triangle = "lower")
+```
+<p>&nbsp;</p>
+
+As we can see from both the correlation matrix and table, the gross revenue is most affected by votes and budget of a movie. This could be because the more votes a movie has the more people have likely went to see it and in general higher budget movies would be expected to generate more revenue than those with lower budgets. Also surprisingly, the score seems to have the the least influence on the gross revenue of a movie, although there is still somewhat of a positive correlation between the two variables. 
+
+Observing the p-values under each correlation coefficient, we can see that the p-value is less than 0.05 which suggests that the correlation between these variables is statistically significant and that both votes and budget indeed could have a positive relationship with gross revenue.
+
+<p>&nbsp;</p>
+
+### Visualising our findings
+```{r, echo=FALSE}
+# Testing relationship between gross revenue and factors like budget, score
+
+ggplot(movies, aes(x = budget/1000000, y = gross/1000000)) + 
+  geom_point() +
+  geom_smooth(method = lm) + 
+  labs(title = "Budget vs Gross Revenue",
+       x = "Budget for Film ($ millions)",
+       y = "Gross Revenue ($ millions)")
+```
+<p>&nbsp;</p>
+
+```{r, echo=FALSE}
+ggplot(movies, aes(x = votes, y = gross/1000000)) + 
+  geom_point() +
+  geom_smooth(method = lm) + 
+  labs(title = "Votes vs Gross Revenue",
+       x = "Number of Votes for Film Score",
+       y = "Gross Revenue ($ millions)")
+```
+<p>&nbsp;</p>
+
+From the visualisations we can see that in general gross revenue has positive correlation with budget and votes. This may suggest that both the budget of a film and votes for a films score may positively influence gross revenue as they increase. Although the correlation between votes and gross revenue appears to be weaker of the two variables.
